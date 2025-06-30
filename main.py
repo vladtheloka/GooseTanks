@@ -208,6 +208,8 @@ def reset_game():
     game_over = False
     level_completed = False
 
+paused = False 
+
 def game_loop():
     global fire_cooldown, invulnerable, game_over, level_completed
     fire_cooldown = 0
@@ -226,6 +228,17 @@ def game_loop():
                 WIDTH, HEIGHT = event.w, event.h
                 pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
                 load_walls()  # обновляем стены под новый размер
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_p:
+                    paused = not paused
+        
+        if paused:
+            draw_window()
+            paused_text = font.render("PAUSED - press P to resume", True, (255, 255, 0))
+            win.blit(paused_text, (WIDTH // 2 - 150, HEIGHT // 2))
+            pygame.display.update()
+            continue
+
 
         keys = pygame.key.get_pressed()
         if not game_over and not level_completed:
