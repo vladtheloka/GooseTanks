@@ -20,34 +20,36 @@ shoot_sound = pygame.mixer.Sound("shoot.wav")
 goose_rect = goose_img.get_rect()
 goose_rect.topleft = (50, 50)
 bullets = []
-
 walls = []
+enemies = []
 
+level_index = 1
 level_completed = False
 game_over = False
+paused = False
 facing = "right"
 health = 3
 invulnerable = 0
 fire_cooldown = 0
 
-def load_walls():
-    global walls
+def load_level(idx):
+    global walls, enemies
     walls = [
-        pygame.Rect(0, 0, WIDTH, 20),  # Верхняя стена
-        pygame.Rect(0, HEIGHT - 20, WIDTH, 20),  # Нижняя стена
-        pygame.Rect(0, 0, 20, HEIGHT),  # Левая стена
-        pygame.Rect(WIDTH - 20, 0, 20, HEIGHT)  # Правая стена
+        pygame.Rect(0, 0, WIDTH, 20),
+        pygame.Rect(0, HEIGHT - 20, WIDTH, 20),
+        pygame.Rect(0, 0, 20, HEIGHT),
+        pygame.Rect(WIDTH - 20, 0, 20, HEIGHT)
     ]
     try:
-        with open("level1.json", "r") as f:
+        with open(f"levels/level{idx}.json", "r") as f:
             data = json.load(f)
-            for wall_data in data["walls"]:
-                rect = pygame.Rect(wall_data["x"], wall_data["y"], wall_data["w"], wall_data["h"])
-                walls.append(rect)
-    except Exception as e:
-        print("Ошибка загрузки level1.json:", e)
-
-load_walls()
+            for wall_data in data.get("walls", []):
+                walls.append(pygame.Rect(wall_data["x"], wall_data["y"], wall_data["w"], wall_data["h"]))
+            enemies[:] = spawn_enemies(data.get("enemy_count", 3))
+    except FileNotFoundError:
+        print(f"Level {idx} not found. Game completed.")
+        pygame.quit()
+        sys.exit()
 
 def spawn_enemies(n):
     result = []
@@ -59,8 +61,6 @@ def spawn_enemies(n):
         result.append(r)
         attempts += 1
     return result
-
-enemies = spawn_enemies(3)
 
 class Bullet:
     def __init__(self, x, y, vx, vy, image):
@@ -102,7 +102,7 @@ def menu_loop(level_done=False):
                     selected_idx = (selected_idx + 1) % len(options)
                 elif event.key == pygame.K_RETURN:
                     choice = options[selected_idx]
-                    if choice == "Start" or choice == "Next Level":
+                    if choice in ["Start", "Next Level"]:
                         return
                     elif choice == "Exit":
                         pygame.quit()
@@ -129,7 +129,7 @@ def draw_window():
     pygame.display.update()
 
 def handle_movement(keys):
-    global facing, goose_rect
+    global facing
     orig = goose_rect.copy()
     if keys[pygame.K_a]:
         goose_rect.x -= 5
@@ -143,11 +143,8 @@ def handle_movement(keys):
     if keys[pygame.K_s]:
         goose_rect.y += 5
         facing = "down"
-    # Не вылетать за экран
     goose_rect.x = max(0, min(goose_rect.x, WIDTH - goose_rect.width))
     goose_rect.y = max(0, min(goose_rect.y, HEIGHT - goose_rect.height))
-
-    # Проверка столкновений со стенами
     for wall in walls:
         if goose_rect.colliderect(wall):
             goose_rect.topleft = orig.topleft
@@ -175,18 +172,15 @@ def update_enemies():
         if any(e.colliderect(w) for w in walls): e.x = orig.x
         e.y += dy
         if any(e.colliderect(w) for w in walls): e.y = orig.y
-
         if not game_over and e.colliderect(goose_rect) and invulnerable == 0:
             health -= 1
             invulnerable = 60
             if health <= 0:
                 game_over = True
-
     if len(enemies) == 0 and not level_completed:
         level_completed = True
 
 def shoot():
-    global facing
     dir_map = {
         "right": (10, 0),
         "left": (-10, 0),
@@ -199,19 +193,17 @@ def shoot():
     shoot_sound.play()
 
 def reset_game():
-    global goose_rect, bullets, enemies, health, invulnerable, game_over, level_completed
+    global goose_rect, bullets, health, invulnerable, game_over, level_completed
     goose_rect.topleft = (50, 50)
     bullets.clear()
-    enemies[:] = spawn_enemies(3)
     health = 3
     invulnerable = 0
     game_over = False
     level_completed = False
-
-paused = False 
+    load_level(level_index)
 
 def game_loop():
-    global fire_cooldown, invulnerable, game_over, level_completed, paused
+    global fire_cooldown, invulnerable, game_over, level_completed, paused, level_index
     fire_cooldown = 0
     run = True
     while run:
@@ -227,27 +219,24 @@ def game_loop():
                 global WIDTH, HEIGHT
                 WIDTH, HEIGHT = event.w, event.h
                 pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
-                load_walls()  # обновляем стены под новый размер
+                load_level(level_index)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_p:
                     paused = not paused
-        
+
         if paused:
             draw_window()
-            paused_text = font.render("PAUSED - press P to resume", True, (255, 255, 0))
-            win.blit(paused_text, (WIDTH // 2 - 150, HEIGHT // 2))
+            paused_text = font.render("PAUSED - Press P to resume", True, (255, 255, 0))
+            win.blit(paused_text, (WIDTH // 2 - 160, HEIGHT // 2))
             pygame.display.update()
             continue
-
 
         keys = pygame.key.get_pressed()
         if not game_over and not level_completed:
             handle_movement(keys)
-
             if keys[pygame.K_SPACE] and fire_cooldown > 15:
                 shoot()
                 fire_cooldown = 0
-
             handle_bullets()
             update_enemies()
 
@@ -255,7 +244,8 @@ def game_loop():
             reset_game()
 
         if level_completed and keys[pygame.K_n]:
-            reset_game()  # позже добавим загрузку следующего уровня
+            level_index += 1
+            reset_game()
 
         draw_window()
 
@@ -263,5 +253,6 @@ def game_loop():
     sys.exit()
 
 if __name__ == "__main__":
+    load_level(level_index)
     menu_loop()
     game_loop()
