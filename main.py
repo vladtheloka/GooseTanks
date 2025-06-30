@@ -211,7 +211,7 @@ def reset_game():
 paused = False 
 
 def game_loop():
-    global fire_cooldown, invulnerable, game_over, level_completed
+    global fire_cooldown, invulnerable, game_over, level_completed, paused
     fire_cooldown = 0
     run = True
     while run:
