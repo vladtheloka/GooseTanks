@@ -22,6 +22,7 @@ goose_rect.topleft = (50, 50)
 bullets = []
 walls = []
 enemies = []
+bonuses = []
 
 level_index = 1
 level_completed = False
@@ -31,15 +32,55 @@ facing = "right"
 health = 3
 invulnerable = 0
 fire_cooldown = 0
+speed_boost = 0
+
+class Enemy:
+    def __init__(self, x, y):
+        self.rect = enemy_img.get_rect(topleft=(x, y))
+        self.speed = 2
+        self.state = "patrolling"  # or 'chasing'
+        patrol_range = random.randint(100, 200)
+        self.patrol_points = [x, min(x + patrol_range, WIDTH - self.rect.width - 20)]
+        self.direction = 1  # 1 = right, -1 = left
+
+    def update(self):
+        if self.state == "patrolling":
+            self.rect.x += self.speed * self.direction
+            if self.rect.x < self.patrol_points[0] or self.rect.x > self.patrol_points[1]:
+                self.direction *= -1
+                self.rect.x += self.speed * self.direction  # prevent sticking on edges
+        elif self.state == "chasing":
+            dx = dy = 0
+            if self.rect.x < goose_rect.x:
+                dx = self.speed
+            elif self.rect.x > goose_rect.x:
+                dx = -self.speed
+            if self.rect.y < goose_rect.y:
+                dy = self.speed
+            elif self.rect.y > goose_rect.y:
+                dy = -self.speed
+            # Move with collision checking
+            orig_x, orig_y = self.rect.x, self.rect.y
+            self.rect.x += dx
+            if any(self.rect.colliderect(w) for w in walls):
+                self.rect.x = orig_x
+            self.rect.y += dy
+            if any(self.rect.colliderect(w) for w in walls):
+                self.rect.y = orig_y
+
+    def can_see_goose(self):
+        vision_rect = self.rect.inflate(150, 150)
+        return vision_rect.colliderect(goose_rect)
 
 def load_level(idx):
-    global walls, enemies
+    global walls, enemies, bonuses
     walls = [
         pygame.Rect(0, 0, WIDTH, 20),
         pygame.Rect(0, HEIGHT - 20, WIDTH, 20),
         pygame.Rect(0, 0, 20, HEIGHT),
         pygame.Rect(WIDTH - 20, 0, 20, HEIGHT)
     ]
+    bonuses.clear()
     try:
         with open(f"levels/level{idx}.json", "r") as f:
             data = json.load(f)
@@ -54,11 +95,17 @@ def load_level(idx):
 def spawn_enemies(n):
     result = []
     attempts = 0
-    while len(result) < n and attempts < 100:
-        r = enemy_img.get_rect(topleft=(random.randint(50, WIDTH - 60), random.randint(50, HEIGHT - 60)))
-        if r.colliderect(goose_rect): continue
-        if any(r.colliderect(w) for w in walls): continue
-        result.append(r)
+    while len(result) < n and attempts < 200:
+        x = random.randint(50, WIDTH - 60)
+        y = random.randint(50, HEIGHT - 60)
+        r = enemy_img.get_rect(topleft=(x, y))
+        if r.colliderect(goose_rect):
+            attempts += 1
+            continue
+        if any(r.colliderect(w) for w in walls):
+            attempts += 1
+            continue
+        result.append(Enemy(x, y))
         attempts += 1
     return result
 
@@ -75,6 +122,15 @@ class Bullet:
 
     def draw(self, surface):
         surface.blit(self.image, self.rect)
+
+class Bonus:
+    def __init__(self, x, y, bonus_type):
+        self.rect = pygame.Rect(x, y, 30, 30)
+        self.type = bonus_type
+        self.color = {"health": (200, 0, 0), "shield": (0, 100, 255), "speed": (255, 255, 0)}[bonus_type]
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, self.color, self.rect)
 
 def draw_menu(selected_idx, options):
     win.fill((20, 20, 20))
@@ -114,8 +170,10 @@ def draw_window():
         pygame.draw.rect(win, (100, 100, 100), w)
     for b in bullets:
         b.draw(win)
-    for e in enemies:
-        win.blit(enemy_img, e)
+    for enemy in enemies:
+        win.blit(enemy_img, enemy.rect)
+    for bonus in bonuses:
+        bonus.draw(win)
     if not game_over:
         win.blit(goose_img, goose_rect)
     else:
@@ -130,18 +188,19 @@ def draw_window():
 
 def handle_movement(keys):
     global facing
+    speed = 7 if speed_boost > 0 else 4
     orig = goose_rect.copy()
     if keys[pygame.K_a]:
-        goose_rect.x -= 5
+        goose_rect.x -= speed
         facing = "left"
     if keys[pygame.K_d]:
-        goose_rect.x += 5
+        goose_rect.x += speed
         facing = "right"
     if keys[pygame.K_w]:
-        goose_rect.y -= 5
+        goose_rect.y -= speed
         facing = "up"
     if keys[pygame.K_s]:
-        goose_rect.y += 5
+        goose_rect.y += speed
         facing = "down"
     goose_rect.x = max(0, min(goose_rect.x, WIDTH - goose_rect.width))
     goose_rect.y = max(0, min(goose_rect.y, HEIGHT - goose_rect.height))
@@ -156,27 +215,27 @@ def handle_bullets():
                 or any(b.rect.colliderect(w) for w in walls)):
             bullets.remove(b)
         else:
-            for e in enemies[:]:
-                if b.rect.colliderect(e):
+            for enemy in enemies[:]:
+                if b.rect.colliderect(enemy.rect):
                     bullets.remove(b)
-                    enemies.remove(e)
+                    enemies.remove(enemy)
                     break
 
 def update_enemies():
     global health, invulnerable, game_over, level_completed
-    for e in enemies:
-        orig = e.copy()
-        dx = 1 if e.x < goose_rect.x else -1 if e.x > goose_rect.x else 0
-        dy = 1 if e.y < goose_rect.y else -1 if e.y > goose_rect.y else 0
-        e.x += dx
-        if any(e.colliderect(w) for w in walls): e.x = orig.x
-        e.y += dy
-        if any(e.colliderect(w) for w in walls): e.y = orig.y
-        if not game_over and e.colliderect(goose_rect) and invulnerable == 0:
+    for enemy in enemies:
+        if enemy.can_see_goose():
+            enemy.state = "chasing"
+        else:
+            enemy.state = "patrolling"
+        enemy.update()
+
+        if not game_over and enemy.rect.colliderect(goose_rect) and invulnerable == 0:
             health -= 1
             invulnerable = 60
             if health <= 0:
                 game_over = True
+
     if len(enemies) == 0 and not level_completed:
         level_completed = True
 
@@ -193,17 +252,19 @@ def shoot():
     shoot_sound.play()
 
 def reset_game():
-    global goose_rect, bullets, health, invulnerable, game_over, level_completed
+    global goose_rect, bullets, health, invulnerable, game_over, level_completed, speed_boost
     goose_rect.topleft = (50, 50)
     bullets.clear()
     health = 3
     invulnerable = 0
     game_over = False
     level_completed = False
+    speed_boost = 0
     load_level(level_index)
+    bonuses.clear()
 
 def game_loop():
-    global fire_cooldown, invulnerable, game_over, level_completed, paused, level_index
+    global fire_cooldown, invulnerable, game_over, level_completed, paused, speed_boost, level_index
     fire_cooldown = 0
     run = True
     while run:
@@ -211,6 +272,8 @@ def game_loop():
         fire_cooldown += 1
         if invulnerable > 0:
             invulnerable -= 1
+        if speed_boost > 0:
+            speed_boost -= 1
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -239,6 +302,24 @@ def game_loop():
                 fire_cooldown = 0
             handle_bullets()
             update_enemies()
+
+            # Проверка сбора бонусов
+            for bonus in bonuses[:]:
+                if goose_rect.colliderect(bonus.rect):
+                    if bonus.type == "health":
+                        if health < 5:
+                            health += 1
+                    elif bonus.type == "shield":
+                        invulnerable = 180
+                    elif bonus.type == "speed":
+                        speed_boost = 180
+                    bonuses.remove(bonus)
+
+            # Спавн бонусов (~раз в 7 секунд)
+            if pygame.time.get_ticks() % 7000 < 60 and len(bonuses) < 2:
+                bx, by = random.randint(50, WIDTH - 80), random.randint(50, HEIGHT - 80)
+                if not any(pygame.Rect(bx, by, 30, 30).colliderect(w) for w in walls):
+                    bonuses.append(Bonus(bx, by, random.choice(["health", "shield", "speed"])))
 
         if game_over and keys[pygame.K_r]:
             reset_game()
