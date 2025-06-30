@@ -1,6 +1,7 @@
 import pygame
 import json
 import random
+import sys
 
 pygame.init()
 WIDTH, HEIGHT = 800, 600
@@ -60,6 +61,37 @@ class Bullet:
 
     def draw(self, surface):
         surface.blit(self.image, self.rect)
+
+def draw_menu(selected_idx):
+    win.fill((20, 20, 20))
+    options = ["Start", "Exit"]
+    for i, option in enumerate(options):
+        color = (255, 255, 255) if i == selected_idx else (150, 150, 150)
+        text_surf = font.render(option, True, color)
+        rect = text_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + i * 40))
+        win.blit(text_surf, rect)
+    pygame.display.update()
+
+def menu_loop():
+    selected_idx = 0
+    while True:
+        clock.tick(60)
+        draw_menu(selected_idx)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    selected_idx = (selected_idx - 1) % 2
+                elif event.key == pygame.K_DOWN:
+                    selected_idx = (selected_idx + 1) % 2
+                elif event.key == pygame.K_RETURN:
+                    if selected_idx == 0:
+                        return  # start game
+                    elif selected_idx == 1:
+                        pygame.quit()
+                        sys.exit()
 
 def draw_window():
     win.fill((30, 30, 30))
@@ -148,31 +180,39 @@ def reset_game():
     invulnerable = 0
     game_over = False
 
-run = True
-while run:
-    clock.tick(60)
-    fire_cooldown += 1
-    if invulnerable > 0:
-        invulnerable -= 1
+def game_loop():
+    global fire_cooldown, invulnerable, game_over
+    fire_cooldown = 0
+    run = True
+    while run:
+        clock.tick(60)
+        fire_cooldown += 1
+        if invulnerable > 0:
+            invulnerable -= 1
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            run = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
 
-    keys = pygame.key.get_pressed()
-    if not game_over:
-        handle_movement(keys)
+        keys = pygame.key.get_pressed()
+        if not game_over:
+            handle_movement(keys)
 
-        if keys[pygame.K_SPACE] and fire_cooldown > 15:
-            shoot()
-            fire_cooldown = 0
+            if keys[pygame.K_SPACE] and fire_cooldown > 15:
+                shoot()
+                fire_cooldown = 0
 
-        handle_bullets()
-        update_enemies()
+            handle_bullets()
+            update_enemies()
 
-    if game_over and keys[pygame.K_r]:
-        reset_game()
+        if game_over and keys[pygame.K_r]:
+            reset_game()
 
-    draw_window()
+        draw_window()
 
-pygame.quit()
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    menu_loop()
+    game_loop()
