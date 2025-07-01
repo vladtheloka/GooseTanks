@@ -49,12 +49,8 @@ class Enemy:
 
     def update(self):
         if self.state == "patrolling":
-            self.rect.x += self.speed * self.direction
-            if self.rect.x < self.patrol_points[0]:
-                self.rect.x = self.patrol_points[0]
-                self.direction *= -1
-            elif self.rect.x > self.patrol_points[1]:
-                self.rect.x = self.patrol_points[1]
+            self._move(self.speed * self.direction, 0)
+            if self.rect.x < self.patrol_points[0] or self.rect.x > self.patrol_points[1]:
                 self.direction *= -1
         elif self.state == "chasing":
             dx = dy = 0
@@ -66,26 +62,26 @@ class Enemy:
                 dy = self.speed
             elif self.rect.y > goose_rect.y:
                 dy = -self.speed
+            self._move(dx, dy)
 
-            # Проверка коллизий со стенами при движении по X
-            self.rect.x += dx
-            for w in walls:
-                if self.rect.colliderect(w):
-                    self.rect.x -= dx
-                    dx = 0
-                    break
+    def _move(self, dx, dy):
+        # По X
+        self.rect.x += dx
+        if any(self.rect.colliderect(w) for w in walls):
+            self.rect.x -= dx
 
-            # Проверка коллизий по Y
-            self.rect.y += dy
-            for w in walls:
-                if self.rect.colliderect(w):
-                    self.rect.y -= dy
-                    dy = 0
-                    break
+        # По Y
+        self.rect.y += dy
+        if any(self.rect.colliderect(w) for w in walls):
+            self.rect.y -= dy
+
+        # Границы окна
+        self.rect.clamp_ip(pygame.Rect(20, 20, WIDTH - 40, HEIGHT - 40))
 
     def can_see_goose(self):
-        vision_rect = self.rect.inflate(150, 150)
+        vision_rect = self.rect.inflate(200, 200)
         return vision_rect.colliderect(goose_rect)
+
 
 
 class Bullet:
@@ -115,10 +111,11 @@ class Bonus:
 def spawn_enemies(n):
     result = []
     attempts = 0
+    inset = 60
     while len(result) < n and attempts < 200:
-        x = random.randint(50, WIDTH - 60)
-        y = random.randint(50, HEIGHT - 60)
-        r = enemy_img.get_rect(topleft=(x, y))
+        x = random.randint(inset, WIDTH - inset - 40)
+        y = random.randint(inset, HEIGHT - inset - 40)
+        r = pygame.Rect(x, y, 40, 40)
         if r.colliderect(goose_rect):
             attempts += 1
             continue
@@ -128,6 +125,7 @@ def spawn_enemies(n):
         result.append(Enemy(x, y))
         attempts += 1
     return result
+
 
 
 def load_level(idx):
