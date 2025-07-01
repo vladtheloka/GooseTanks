@@ -1,7 +1,8 @@
 import pygame
-import json
 import random
 import sys
+import json
+import os
 
 pygame.init()
 WIDTH, HEIGHT = 800, 600
@@ -11,44 +12,50 @@ pygame.display.set_caption("GooseTanks")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 20)
 
-# Загрузка ассетов
-goose_img = pygame.image.load("goose.png")
-bullet_img = pygame.image.load("bullet.png")
-enemy_img = pygame.image.load("enemy_goose.png")
-shoot_sound = pygame.mixer.Sound("shoot.wav")
+# TODO: Замени на загрузку реальных спрайтов
+goose_img = pygame.Surface((40, 40))
+goose_img.fill((255, 255, 0))
+enemy_img = pygame.Surface((40, 40))
+enemy_img.fill((255, 0, 0))
+bullet_img = pygame.Surface((10, 5))
+bullet_img.fill((0, 255, 0))
 
-goose_rect = goose_img.get_rect()
-goose_rect.topleft = (50, 50)
+# Игровые переменные
+goose_rect = goose_img.get_rect(topleft=(50, 50))
 bullets = []
 walls = []
 enemies = []
 bonuses = []
 
-level_index = 1
-level_completed = False
-game_over = False
-paused = False
-facing = "right"
 health = 3
 invulnerable = 0
 fire_cooldown = 0
 speed_boost = 0
+level_index = 1
+game_over = False
+level_completed = False
+paused = False
+facing = "right"
+
 
 class Enemy:
     def __init__(self, x, y):
         self.rect = enemy_img.get_rect(topleft=(x, y))
         self.speed = 2
-        self.state = "patrolling"  # or 'chasing'
+        self.state = "patrolling"
         patrol_range = random.randint(100, 200)
         self.patrol_points = [x, min(x + patrol_range, WIDTH - self.rect.width - 20)]
-        self.direction = 1  # 1 = right, -1 = left
+        self.direction = 1
 
     def update(self):
         if self.state == "patrolling":
             self.rect.x += self.speed * self.direction
-            if self.rect.x < self.patrol_points[0] or self.rect.x > self.patrol_points[1]:
+            if self.rect.x < self.patrol_points[0]:
+                self.rect.x = self.patrol_points[0]
                 self.direction *= -1
-                self.rect.x += self.speed * self.direction  # prevent sticking on edges
+            elif self.rect.x > self.patrol_points[1]:
+                self.rect.x = self.patrol_points[1]
+                self.direction *= -1
         elif self.state == "chasing":
             dx = dy = 0
             if self.rect.x < goose_rect.x:
@@ -59,38 +66,51 @@ class Enemy:
                 dy = self.speed
             elif self.rect.y > goose_rect.y:
                 dy = -self.speed
-            # Move with collision checking
-            orig_x, orig_y = self.rect.x, self.rect.y
+
+            # Проверка коллизий со стенами при движении по X
             self.rect.x += dx
-            if any(self.rect.colliderect(w) for w in walls):
-                self.rect.x = orig_x
+            for w in walls:
+                if self.rect.colliderect(w):
+                    self.rect.x -= dx
+                    dx = 0
+                    break
+
+            # Проверка коллизий по Y
             self.rect.y += dy
-            if any(self.rect.colliderect(w) for w in walls):
-                self.rect.y = orig_y
+            for w in walls:
+                if self.rect.colliderect(w):
+                    self.rect.y -= dy
+                    dy = 0
+                    break
 
     def can_see_goose(self):
         vision_rect = self.rect.inflate(150, 150)
         return vision_rect.colliderect(goose_rect)
 
-def load_level(idx):
-    global walls, enemies, bonuses
-    walls = [
-        pygame.Rect(0, 0, WIDTH, 20),
-        pygame.Rect(0, HEIGHT - 20, WIDTH, 20),
-        pygame.Rect(0, 0, 20, HEIGHT),
-        pygame.Rect(WIDTH - 20, 0, 20, HEIGHT)
-    ]
-    bonuses.clear()
-    try:
-        with open(f"levels/level{idx}.json", "r") as f:
-            data = json.load(f)
-            for wall_data in data.get("walls", []):
-                walls.append(pygame.Rect(wall_data["x"], wall_data["y"], wall_data["w"], wall_data["h"]))
-            enemies[:] = spawn_enemies(data.get("enemy_count", 3))
-    except FileNotFoundError:
-        print(f"Level {idx} not found. Game completed.")
-        pygame.quit()
-        sys.exit()
+
+class Bullet:
+    def __init__(self, x, y, vx, vy):
+        self.rect = bullet_img.get_rect(center=(x, y))
+        self.vx = vx
+        self.vy = vy
+
+    def update(self):
+        self.rect.x += self.vx
+        self.rect.y += self.vy
+
+    def draw(self, surface):
+        surface.blit(bullet_img, self.rect)
+
+
+class Bonus:
+    def __init__(self, x, y, btype):
+        self.rect = pygame.Rect(x, y, 30, 30)
+        self.type = btype
+        self.color = {"health": (200, 0, 0), "shield": (0, 100, 255), "speed": (255, 255, 0)}[btype]
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, self.color, self.rect)
+
 
 def spawn_enemies(n):
     result = []
@@ -109,67 +129,34 @@ def spawn_enemies(n):
         attempts += 1
     return result
 
-class Bullet:
-    def __init__(self, x, y, vx, vy, image):
-        self.rect = image.get_rect(center=(x, y))
-        self.vx = vx
-        self.vy = vy
-        self.image = image
 
-    def update(self):
-        self.rect.x += self.vx
-        self.rect.y += self.vy
+def load_level(idx):
+    global walls, enemies, bonuses
+    path = f"levels/level{idx}.json"
+    if not os.path.exists(path):
+        print(f"Level {idx} not found. Game completed.")
+        return
 
-    def draw(self, surface):
-        surface.blit(self.image, self.rect)
+    with open(path) as f:
+        data = json.load(f)
 
-class Bonus:
-    def __init__(self, x, y, bonus_type):
-        self.rect = pygame.Rect(x, y, 30, 30)
-        self.type = bonus_type
-        self.color = {"health": (200, 0, 0), "shield": (0, 100, 255), "speed": (255, 255, 0)}[bonus_type]
+    walls = [pygame.Rect(*w) for w in data.get("walls", [])]
+    enemies.clear()
+    for x, y in data.get("enemies", []):
+        enemies.append(Enemy(x, y))
+    bonuses.clear()
+    for b in data.get("bonuses", []):
+        bx, by, btype = b
+        bonuses.append(Bonus(bx, by, btype))
 
-    def draw(self, surface):
-        pygame.draw.rect(surface, self.color, self.rect)
 
-def draw_menu(selected_idx, options):
-    win.fill((20, 20, 20))
-    for i, option in enumerate(options):
-        color = (255, 255, 255) if i == selected_idx else (150, 150, 150)
-        text_surf = font.render(option, True, color)
-        rect = text_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + i * 40))
-        win.blit(text_surf, rect)
-    pygame.display.update()
-
-def menu_loop(level_done=False):
-    selected_idx = 0
-    options = ["Start", "Exit"] if not level_done else ["Next Level", "Exit"]
-    while True:
-        clock.tick(60)
-        draw_menu(selected_idx, options)
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_UP:
-                    selected_idx = (selected_idx - 1) % len(options)
-                elif event.key == pygame.K_DOWN:
-                    selected_idx = (selected_idx + 1) % len(options)
-                elif event.key == pygame.K_RETURN:
-                    choice = options[selected_idx]
-                    if choice in ["Start", "Next Level"]:
-                        return
-                    elif choice == "Exit":
-                        pygame.quit()
-                        sys.exit()
 
 def draw_window():
     win.fill((30, 30, 30))
     for w in walls:
         pygame.draw.rect(win, (100, 100, 100), w)
-    for b in bullets:
-        b.draw(win)
+    for bullet in bullets:
+        bullet.draw(win)
     for enemy in enemies:
         win.blit(enemy_img, enemy.rect)
     for bonus in bonuses:
@@ -177,14 +164,16 @@ def draw_window():
     if not game_over:
         win.blit(goose_img, goose_rect)
     else:
-        over = font.render("GAME OVER - press R to restart", True, (255, 0, 0))
-        win.blit(over, (WIDTH // 2 - 140, HEIGHT // 2))
+        over_text = font.render("GAME OVER - Press R to restart", True, (255, 0, 0))
+        win.blit(over_text, (WIDTH // 2 - 140, HEIGHT // 2))
     if level_completed:
-        completed_text = font.render("LEVEL COMPLETED! Press N for Next Level", True, (0, 255, 0))
+        completed_text = font.render("LEVEL COMPLETED! Press N for next level", True, (0, 255, 0))
         win.blit(completed_text, (WIDTH // 2 - 180, HEIGHT // 2 - 40))
-    health_surface = font.render(f"💛 {health}", True, (255, 200, 200))
-    win.blit(health_surface, (WIDTH - 100, 10))
+
+    health_surface = font.render(f"Health: {health}", True, (255, 255, 255))
+    win.blit(health_surface, (WIDTH - 120, 10))
     pygame.display.update()
+
 
 def handle_movement(keys):
     global facing
@@ -202,24 +191,31 @@ def handle_movement(keys):
     if keys[pygame.K_s]:
         goose_rect.y += speed
         facing = "down"
-    goose_rect.x = max(0, min(goose_rect.x, WIDTH - goose_rect.width))
-    goose_rect.y = max(0, min(goose_rect.y, HEIGHT - goose_rect.height))
+
+    # Ограничения по экрану
+    goose_rect.x = max(20, min(goose_rect.x, WIDTH - goose_rect.width - 20))
+    goose_rect.y = max(20, min(goose_rect.y, HEIGHT - goose_rect.height - 20))
+
+    # Проверка коллизий со стенами
     for wall in walls:
         if goose_rect.colliderect(wall):
             goose_rect.topleft = orig.topleft
 
+
 def handle_bullets():
+    global bullets, enemies
     for b in bullets[:]:
         b.update()
         if (b.rect.x > WIDTH or b.rect.x < 0 or b.rect.y > HEIGHT or b.rect.y < 0
                 or any(b.rect.colliderect(w) for w in walls)):
             bullets.remove(b)
-        else:
-            for enemy in enemies[:]:
-                if b.rect.colliderect(enemy.rect):
-                    bullets.remove(b)
-                    enemies.remove(enemy)
-                    break
+            continue
+        for enemy in enemies[:]:
+            if b.rect.colliderect(enemy.rect):
+                bullets.remove(b)
+                enemies.remove(enemy)
+                break
+
 
 def update_enemies():
     global health, invulnerable, game_over, level_completed
@@ -239,7 +235,11 @@ def update_enemies():
     if len(enemies) == 0 and not level_completed:
         level_completed = True
 
+
 def shoot():
+    global fire_cooldown
+    if fire_cooldown < 20:
+        return
     dir_map = {
         "right": (10, 0),
         "left": (-10, 0),
@@ -247,9 +247,10 @@ def shoot():
         "down": (0, 10)
     }
     vx, vy = dir_map.get(facing, (10, 0))
-    b = Bullet(goose_rect.centerx, goose_rect.centery, vx, vy, bullet_img)
+    b = Bullet(goose_rect.centerx, goose_rect.centery, vx, vy)
     bullets.append(b)
-    shoot_sound.play()
+    fire_cooldown = 0
+
 
 def reset_game():
     global goose_rect, bullets, health, invulnerable, game_over, level_completed, speed_boost
@@ -263,8 +264,39 @@ def reset_game():
     load_level(level_index)
     bonuses.clear()
 
+
+def menu_loop(level_done=False):
+    selected_idx = 0
+    options = ["Start", "Exit"] if not level_done else ["Next Level", "Exit"]
+    while True:
+        clock.tick(60)
+        win.fill((20, 20, 20))
+        for i, option in enumerate(options):
+            color = (255, 255, 255) if i == selected_idx else (150, 150, 150)
+            text_surf = font.render(option, True, color)
+            rect = text_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + i * 40))
+            win.blit(text_surf, rect)
+        pygame.display.update()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    selected_idx = (selected_idx - 1) % len(options)
+                elif event.key == pygame.K_DOWN:
+                    selected_idx = (selected_idx + 1) % len(options)
+                elif event.key == pygame.K_RETURN:
+                    choice = options[selected_idx]
+                    if choice in ["Start", "Next Level"]:
+                        return
+                    elif choice == "Exit":
+                        pygame.quit()
+                        sys.exit()
+
+
 def game_loop():
-    global fire_cooldown, invulnerable, game_over, level_completed, paused, speed_boost, level_index
+    global fire_cooldown, invulnerable, game_over, paused, speed_boost, level_index, health
     fire_cooldown = 0
     run = True
     while run:
@@ -285,7 +317,13 @@ def game_loop():
                 load_level(level_index)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_p:
+                    global paused
                     paused = not paused
+                elif event.key == pygame.K_r and game_over:
+                    reset_game()
+                elif event.key == pygame.K_n and level_completed:
+                    level_index += 1
+                    reset_game()
 
         if paused:
             draw_window()
@@ -297,13 +335,12 @@ def game_loop():
         keys = pygame.key.get_pressed()
         if not game_over and not level_completed:
             handle_movement(keys)
-            if keys[pygame.K_SPACE] and fire_cooldown > 15:
+            if keys[pygame.K_SPACE]:
                 shoot()
-                fire_cooldown = 0
             handle_bullets()
             update_enemies()
 
-            # Проверка сбора бонусов
+            # Проверка бонусов
             for bonus in bonuses[:]:
                 if goose_rect.colliderect(bonus.rect):
                     if bonus.type == "health":
@@ -315,23 +352,17 @@ def game_loop():
                         speed_boost = 180
                     bonuses.remove(bonus)
 
-            # Спавн бонусов (~раз в 7 секунд)
+            # Спавн бонусов (примерно раз в 7 секунд)
             if pygame.time.get_ticks() % 7000 < 60 and len(bonuses) < 2:
                 bx, by = random.randint(50, WIDTH - 80), random.randint(50, HEIGHT - 80)
                 if not any(pygame.Rect(bx, by, 30, 30).colliderect(w) for w in walls):
                     bonuses.append(Bonus(bx, by, random.choice(["health", "shield", "speed"])))
 
-        if game_over and keys[pygame.K_r]:
-            reset_game()
-
-        if level_completed and keys[pygame.K_n]:
-            level_index += 1
-            reset_game()
-
         draw_window()
 
     pygame.quit()
     sys.exit()
+
 
 if __name__ == "__main__":
     load_level(level_index)
